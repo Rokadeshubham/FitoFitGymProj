@@ -1,0 +1,855 @@
+using ShipmentRecallUpdate.Models;
+using System;
+using System.Collections.Generic;
+using System.Configuration;
+using System.Data;
+using System.Data.OleDb;
+using System.Data.SqlClient;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Web;
+using System.Web.Mvc;
+using OfficeOpenXml;
+using System.Text.RegularExpressions;
+using System.Net;
+
+namespace ShipmentRecallUpdate.Controllers
+{
+    public class DRController : Controller
+    {
+        SqlConnection SQLConnection = new SqlConnection(ConfigurationManager.ConnectionStrings["con"].ConnectionString);
+        DealerRecallEntities entities = new DealerRecallEntities();
+        OleDbConnection Econ;
+        string billingAccount = "";
+        string zipCode = "";
+        string newDate = "";
+        string filename = "";
+        string filepath = "";
+        string uploadedFileName = "";
+        string ReportsfolderName = "";
+        List<DRFailureRecords> FailedRecordsList = new List<DRFailureRecords>();
+        DataTable tbl = new DataTable();
+
+
+
+
+
+        // GET: DR
+        //[ValidateAntiForgeryToken()]
+
+        public ActionResult Index()
+        {
+            if (Session["UserId"]!=null)
+            {
+                return View();
+            }
+            else
+            {
+                return RedirectToAction("Login","Login");
+            }
+            
+        }
+
+        [HttpPost]
+       
+        public ActionResult Index(HttpPostedFileBase file)
+
+        {
+            filename = Guid.NewGuid() + Path.GetExtension(file.FileName);
+            uploadedFileName = Path.GetFileNameWithoutExtension(file.FileName);
+            filepath = "/drfolder/" + filename;
+
+            file.SaveAs(Path.Combine(Server.MapPath("/drfolder"), filename));
+
+            TakingValues(filepath);
+            InsertExceldatatoTable(filepath, filename);
+
+            UpdateByCheckingConditons();
+
+            //InsertExceldatatoTable(filepath, filename);
+            CheckReportData();
+            //UpdateRecords();
+
+            FailedRecordsExport();
+
+            //ViewData["sucessMessage"] = "File Data Inserted successfully ";
+            DropTempTable();
+
+
+
+            return View();
+
+        }
+        public void TakingValues(string fileepath)
+        {
+            List<string> excelData = new List<string>();
+
+            ////read the Excel file as byte array
+            //byte[] bin = File.ReadAllBytes("C:\\ExcelDemo.xlsx");
+
+            //or if you use asp.net, get the relative path
+            byte[] bin = System.IO.File.ReadAllBytes(Server.MapPath(fileepath));
+            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+            //create a new Excel package in a memorystream
+            using (MemoryStream stream = new MemoryStream(bin))
+            using (ExcelPackage excelPackage = new ExcelPackage(stream))
+            {
+                int workCount = 1;
+                //loop all worksheets
+                foreach (ExcelWorksheet worksheet in excelPackage.Workbook.Worksheets)
+                {
+                    if (workCount == 2)
+                    {
+
+
+                        billingAccount = Convert.ToString(worksheet.Cells[2, 2].Value);
+                        zipCode = Convert.ToString(worksheet.Cells[3, 2].Value);
+                        newDate = Convert.ToString(worksheet.Cells[6, 2].Value);
+
+
+                    }
+                    workCount++;
+                }
+            }
+            //string fileFullPath = "";
+            //fileFullPath = Server.MapPath("/drfolder/") + filename;
+            //Microsoft.Office.Interop.Excel.Application excel = new Microsoft.Office.Interop.Excel.Application();
+            //Microsoft.Office.Interop.Excel.Workbook wb = excel.Workbooks.Open(fileFullPath);
+            //Microsoft.Office.Interop.Excel.Worksheet excelSheet = wb.ActiveSheet;
+
+            //Read the first cell
+            //billingAccount = Convert.ToString(excelSheet.Cells[2, 2].Value);
+            //zipCode = Convert.ToString(excelSheet.Cells[3, 2].Value);
+            //newDate = Convert.ToString(excelSheet.Cells[6, 2].Value);
+
+            //wb.Close();
+        }
+        private void ExcelConn(string filepath)
+
+        {
+
+            string constr = string.Format(@"Provider=Microsoft.ACE.OLEDB.12.0;Data Source={0};Extended Properties=""Excel 12.0 Xml;HDR=YES;""", filepath);
+
+            Econ = new OleDbConnection(constr);
+
+
+
+        }
+        //public void InsertExceldatatoTable(string fileepath, string filename)
+        //{
+        //    //string datetime = DateTime.Now.ToString("yyyyMMddHHmmss");
+        //    //string LogFolder = @"F:\Apps\";
+        //    //try
+        //    //{
+
+        //    //Provide the table name in which you want to load the data
+        //    string TableName = "DRTemp";
+        //    //Provide the schema of table 
+        //    string SchemaName = "dbo";
+        //    //Provide the starting column for read actul records
+        //    string StartingColumn = "A";
+        //    //Provide the end column till which you want to read
+        //    string EndingColumn = "B";
+        //    //Provide the row number from which you like to start reading
+        //    string StartReadingFromRow = "10";
+
+
+        //    //Declare and initilize variables
+        //    string fileFullPath = "";
+
+        //    ////Get one Book(Excel file at a time)
+        //    //foreach (FileInfo file in files)
+        //    //{
+        //    fileFullPath = Server.MapPath("/drfolder/") + filename;
+        //    //Taking values into Variable
+
+        //    //Create Excel Connection
+        //    string ConStr;
+        //    string HDR;
+        //    HDR = "YES";
+        //    ConStr = "Provider=Microsoft.ACE.OLEDB.12.0;Data Source="
+        //        + fileFullPath + ";Extended Properties=\"Excel 12.0;HDR=" + HDR + ";IMEX=0\"";
+        //    OleDbConnection cnn = new OleDbConnection(ConStr);
+
+        //    //Get Sheet Name, it can handle multiple sheets
+        //    cnn.Open();
+        //    System.Data.DataTable dtSheet = cnn.GetOleDbSchemaTable(OleDbSchemaGuid.Tables, null);
+        //    string sheetname;
+        //    sheetname = "";
+        //    int sheetCount1 = 0;
+        //    foreach (DataRow drSheet in dtSheet.Rows)
+        //    {
+        //        if (sheetCount1 == 0)
+        //        {
+
+
+        //            if (drSheet["TABLE_NAME"].ToString().Contains("$"))
+        //            {
+        //                string sheetname1 = drSheet["TABLE_NAME"].ToString();
+        //                sheetname = sheetname1.Trim(new char[] { (char)39 });
+
+        //                //OleDbCommand command = new OleDbCommand("select *," + thirdParty + " as [ThirdPartyCol] from [sheet$]", cnn);
+
+        //                //Load the DataTable with Sheet Data so we can get the column header
+        //                OleDbCommand oconn = new OleDbCommand("select top 1 * from [" + sheetname + StartingColumn + StartReadingFromRow + ":" + EndingColumn + "]", cnn);
+        //                OleDbDataAdapter adp = new OleDbDataAdapter(oconn);
+        //                DataTable dt = new DataTable();
+        //                adp.Fill(dt);
+        //                cnn.Close();
+
+        //                //Prepare Header columns list so we can run against Database to get matching columns for a table.   
+        //                //If columns does not exists in table, it will ignore and load only matching columns data
+        //                string ExcelHeaderColumn = "";
+        //                string SQLQueryToGetMatchingColumn = "";
+        //                for (int i = 0; i < dt.Columns.Count; i++)
+        //                {
+        //                    if (i != dt.Columns.Count - 1)
+        //                        ExcelHeaderColumn += "'" + dt.Columns[i].ColumnName + "'" + ",";
+        //                    else
+        //                        ExcelHeaderColumn += "'" + dt.Columns[i].ColumnName + "'";
+        //                }
+
+        //                SQLQueryToGetMatchingColumn = "select STUFF((Select  ',['+Column_Name+']' from Information_schema.Columns where Table_Name='" +
+        //                    TableName + "' and Table_SChema='" + SchemaName + "'" +
+        //                    "and Column_Name in (" + @ExcelHeaderColumn + ") for xml path('')),1,1,'') AS ColumnList";
+
+
+        //                //Create Connection to SQL Server Database from which you like to export tables to Excel
+
+
+        //                //Get Matching Column List from SQL Server
+        //                string SQLColumnList = "";
+        //                SqlCommand cmd = SQLConnection.CreateCommand();
+        //                cmd.CommandText = SQLQueryToGetMatchingColumn;
+        //                SQLConnection.Open();
+        //                SQLColumnList = Convert.ToString(cmd.ExecuteScalar());//change
+        //                SQLConnection.Close();
+
+        //                //Use Actual Matching Columns to get data from Excel Sheet
+        //                OleDbConnection cnn1 = new OleDbConnection(ConStr);
+        //                cnn1.Open();
+        //                OleDbCommand oconn1 = new OleDbCommand("select " + SQLColumnList
+        //                    + " from [" + sheetname + StartingColumn
+        //                    + StartReadingFromRow + ":" + EndingColumn + "]", cnn1);
+        //                OleDbDataAdapter adp1 = new OleDbDataAdapter(oconn1);
+        //                System.Data.DataTable dt1 = new System.Data.DataTable();
+        //                adp1.Fill(dt1);
+        //                cnn1.Close();
+
+
+
+
+        //                SQLConnection.Open();
+
+        //                using (SqlCommand command1 = SQLConnection.CreateCommand())
+        //                {
+
+        //                    command1.CommandType = CommandType.Text;
+
+        //                    for (int i = 0; i < dt1.Rows.Count; i++)
+        //                        if (dt1.Rows[i][0] != null && dt1.Rows[i][0].ToString() != "" && dt1.Rows[i][1] != null && dt1.Rows[i][1].ToString() != "" && dt1.Rows[i][0].ToString() != "1" && dt1.Rows[i][1].ToString() != "1")
+        //                        {
+        //                            command1.CommandText += "INSERT INTO DRTEMP ([Serial Number],[Product Disposition],[BillAccount],[ZipCode],[newDate]) VALUES ('" + dt1.Rows[i]["Serial Number"].ToString() + "','" + dt1.Rows[i]["Product Disposition"].ToString() + "','" + billingAccount + "','" + zipCode + "','" + newDate + "'); ";
+        //                        }
+        //                    command1.CommandTimeout = 600;
+        //                    command1.ExecuteNonQuery();
+
+        //                }
+
+        //                SQLConnection.Close();
+
+        //            }
+        //        }
+        //        sheetCount1++;
+        //    }
+
+        //}
+
+
+        public void InsertExceldatatoTable(string fileepath, string filename)
+        {
+            //string datetime = DateTime.Now.ToString("yyyyMMddHHmmss");
+            //string LogFolder = @"F:\Apps\";
+            //try
+            //{
+
+            //Provide the table name in which you want to load the data
+            string TableName = "DRTemp";
+            //Provide the schema of table 
+            string SchemaName = "dbo";
+            //Provide the starting column for read actul records
+            string StartingColumn = "A";
+            //Provide the end column till which you want to read
+            string EndingColumn = "B";
+            //Provide the row number from which you like to start reading
+            string StartReadingFromRow = "10";
+
+
+            //Declare and initilize variables
+            string fileFullPath = "";
+
+            ////Get one Book(Excel file at a time)
+            //foreach (FileInfo file in files)
+            //{
+            fileFullPath = Server.MapPath("/drfolder/") + filename;
+            //Taking values into Variable
+
+            //Create Excel Connection
+            string ConStr;
+            string HDR;
+            HDR = "YES";
+            ConStr = "Provider=Microsoft.ACE.OLEDB.12.0;Data Source="
+                + fileFullPath + ";Extended Properties=\"Excel 12.0;HDR=" + HDR + ";IMEX=0\"";
+            OleDbConnection cnn = new OleDbConnection(ConStr);
+
+            //Get Sheet Name, it can handle multiple sheets
+            cnn.Open();
+            System.Data.DataTable dtSheet = cnn.GetOleDbSchemaTable(OleDbSchemaGuid.Tables, null);
+            string sheetname;
+            sheetname = "";
+            int sheetCount1 = 0;
+            foreach (DataRow drSheet in dtSheet.Rows)
+            {
+                if (sheetCount1 == 0)
+                {
+
+
+                    if (drSheet["TABLE_NAME"].ToString().Contains("$"))
+                    {
+                        string sheetname1 = drSheet["TABLE_NAME"].ToString();
+                        sheetname = sheetname1.Trim(new char[] { (char)39 });
+
+                        //OleDbCommand command = new OleDbCommand("select *," + thirdParty + " as [ThirdPartyCol] from [sheet$]", cnn);
+
+                        //Load the DataTable with Sheet Data so we can get the column header
+                        OleDbCommand oconn = new OleDbCommand("select top 1 * from [" + sheetname + StartingColumn + StartReadingFromRow + ":" + EndingColumn + "]", cnn);
+                        OleDbDataAdapter adp = new OleDbDataAdapter(oconn);
+                        DataTable dt = new DataTable();
+                        adp.Fill(dt);
+                        cnn.Close();
+
+                        //Prepare Header columns list so we can run against Database to get matching columns for a table.   
+                        //If columns does not exists in table, it will ignore and load only matching columns data
+                        string ExcelHeaderColumn = "";
+                        string SQLQueryToGetMatchingColumn = "";
+                        for (int i = 0; i < dt.Columns.Count; i++)
+                        {
+                            if (i != dt.Columns.Count - 1)
+                                ExcelHeaderColumn += "'" + dt.Columns[i].ColumnName + "'" + ",";
+                            else
+                                ExcelHeaderColumn += "'" + dt.Columns[i].ColumnName + "'";
+                        }
+
+                        SQLQueryToGetMatchingColumn = "select STUFF((Select  ',['+Column_Name+']' from Information_schema.Columns where Table_Name='" +
+                            TableName + "' and Table_SChema='" + SchemaName + "'" +
+                            "and Column_Name in (" + @ExcelHeaderColumn + ") for xml path('')),1,1,'') AS ColumnList";
+
+
+                        //Create Connection to SQL Server Database from which you like to export tables to Excel
+
+
+                        //Get Matching Column List from SQL Server
+                        string SQLColumnList = "";
+                        SqlCommand cmd = SQLConnection.CreateCommand();
+                        cmd.CommandText = SQLQueryToGetMatchingColumn;
+                        SQLConnection.Open();
+                        SQLColumnList = Convert.ToString(cmd.ExecuteScalar());//change
+                        SQLConnection.Close();
+
+                        //Use Actual Matching Columns to get data from Excel Sheet
+                        OleDbConnection cnn1 = new OleDbConnection(ConStr);
+                        cnn1.Open();
+                        OleDbCommand oconn1 = new OleDbCommand("select " + SQLColumnList
+                            + " from [" + sheetname + StartingColumn
+                            + StartReadingFromRow + ":" + EndingColumn + "]", cnn1);
+                        OleDbDataAdapter adp1 = new OleDbDataAdapter(oconn1);
+                        System.Data.DataTable dt1 = new System.Data.DataTable();
+                        adp1.Fill(dt1);
+                        cnn1.Close();
+
+                        //DataTable tbl = new DataTable();
+                        tbl.Columns.Add(new DataColumn("Serial Number", typeof(string)));
+                        tbl.Columns.Add(new DataColumn("Product Disposition", typeof(string)));
+                        tbl.Columns.Add(new DataColumn("BillAccount", typeof(string)));
+                        tbl.Columns.Add(new DataColumn("ZipCode", typeof(string)));
+                        tbl.Columns.Add(new DataColumn("NewDate", typeof(DateTime)));
+
+
+                        for (int i = 0; i < dt1.Rows.Count; i++)
+                        {
+                            if (dt1.Rows[i][0] != null && dt1.Rows[i][0].ToString() != "" && dt1.Rows[i][1] != null && dt1.Rows[i][1].ToString() != "" && dt1.Rows[i][0].ToString() != "1" && dt1.Rows[i][1].ToString() != "1")
+                            {
+                                DataRow dr = tbl.NewRow();
+                                dr["Serial Number"] = dt1.Rows[i]["Serial Number"];
+                                dr["Product Disposition"] = dt1.Rows[i]["Product Disposition"];
+                                dr["BillAccount"] = billingAccount;
+                                dr["ZipCode"] = zipCode;
+                                dr["NewDate"] = newDate;
+                                tbl.Rows.Add(dr);
+                            }
+                           
+                        }
+                        SqlBulkCopy objbulk = new SqlBulkCopy(SQLConnection);
+
+                        //assign Destination table name  
+                        objbulk.DestinationTableName = "DRTemp";
+                        objbulk.ColumnMappings.Add("Serial Number", "Serial Number");
+                        objbulk.ColumnMappings.Add("Product Disposition", "Product Disposition");
+                        objbulk.ColumnMappings.Add("BillAccount", "BillAccount");
+                        objbulk.ColumnMappings.Add("ZipCode", "ZipCode");
+                        objbulk.ColumnMappings.Add("NewDate", "NewDate");
+
+                        SQLConnection.Open();
+                        //insert bulk Records into DataBase.  
+                        objbulk.WriteToServer(tbl);
+                        SQLConnection.Close();
+
+                    }
+                }
+                sheetCount1++;
+            }
+
+        }
+        //Process Update only when billtono and zipcode is present
+        public void UpdateByCheckingConditons()
+        {
+            if (billingAccount != null && zipCode != null)
+            {
+
+
+                UpdateRecords();
+            }
+            else
+            {
+                ViewData["NotProcessMessage"] = "This file will not be process because BillToNo and BilltoZip values are empty in excel";
+            }
+        }
+
+        //UPDATE RECORDS IN SHIPMENT RECALL 
+        public void UpdateRecords()
+        {
+            this.entities.Database.CommandTimeout = 0;
+            var table1 = entities.DRTemps.ToList();
+            var table3 = tbl;
+
+            var table2 = entities.ShipmentRecalls;
+
+            //var table3 = entities.Acknowledgements.ToList();
+            var acknowledgementCheck = entities.Acknowledgements.Where(x => x.billtono == billingAccount && x.billtozip == zipCode).ToList().FirstOrDefault();
+            if (acknowledgementCheck != null)
+            {
+
+                foreach (var row in table1.ToList())
+                {
+
+                    var ShipmentRecallList = entities.ShipmentRecalls.Where(x => x.serialno == row.Serial_Number && x.billtono == row.BillAccount && x.billtozip == row.ZipCode).ToList().FirstOrDefault();
+                    if (ShipmentRecallList != null)
+                    {
+
+
+                        //Checking Answers is null or not
+                        if (string.IsNullOrEmpty(ShipmentRecallList.Answers))
+                        {
+
+                            string answerField1 = "Device will be repaired by my company";
+                            if (Convert.ToString(row.Product_Disposition.ToLower()) == answerField1.ToLower())
+                            {
+                                if (newDate != null)
+                                {
+                                    this.entities.Database.CommandTimeout = 0;
+                                    ShipmentRecallList.Answers = row.Product_Disposition;
+                                    ShipmentRecallList.ImageUploadDateTime = row.NewDate;
+                                    ShipmentRecallList.ImageName = "BulkUploaded.png";
+                                    ShipmentRecallList.ModifiedBy = Convert.ToString(Session["UserName"]);
+                                    entities.ShipmentRecalls.Attach(ShipmentRecallList);
+                                    entities.Entry(ShipmentRecallList).Property(p => p.ImageUploadDateTime).IsModified = true;
+                                    entities.Entry(ShipmentRecallList).Property(p => p.Answers).IsModified = true;
+                                    entities.Entry(ShipmentRecallList).Property(p => p.ImageName).IsModified = true;
+                                    entities.Entry(ShipmentRecallList).Property(p => p.ModifiedBy).IsModified = true;
+                                }
+                                else
+                                {
+                                    //Date not provided
+                                    FailedRecordsList.Add(new DRFailureRecords { SerialNumber = row.Serial_Number, FailedReason = "Date not available in Excel" });
+                                }
+
+                            }
+                            else
+                            {
+                                //this.entities.Database.CommandTimeout = 0;
+                                ShipmentRecallList.Answers = row.Product_Disposition;
+                                ShipmentRecallList.ImageName = "BulkUploaded.png";
+                                ShipmentRecallList.ModifiedBy = Convert.ToString(Session["UserName"]);
+                                entities.ShipmentRecalls.Attach(ShipmentRecallList);
+                                entities.Entry(ShipmentRecallList).Property(p => p.Answers).IsModified = true;
+                                entities.Entry(ShipmentRecallList).Property(p => p.ImageName).IsModified = true;
+                                entities.Entry(ShipmentRecallList).Property(p => p.ModifiedBy).IsModified = true;
+
+
+                            }
+                            //ShipmentRecallList.ImageName = "BulkUploaded.png";
+                            //entities.ShipmentRecalls.Attach(ShipmentRecallList);
+                            //entities.Entry(ShipmentRecallList).Property(p => p.ImageName).IsModified = true;
+
+
+                        }
+                        else
+                        {
+                            //Blank record
+                            FailedRecordsList.Add(new DRFailureRecords { SerialNumber = row.Serial_Number, FailedReason = "Answer is already present in shipment Recall  " });
+
+                        }
+
+
+                    }
+                    else
+                    {
+                        //billtono or zipcode wrong
+                        FailedRecordsList.Add(new DRFailureRecords { SerialNumber = row.Serial_Number, FailedReason = "Serial number is not belongs to provided bill to number and zip code" });
+
+                    }
+
+
+                }
+
+            }
+            else
+            {
+                //Acknowledgement not provided by user
+                FailedRecordsList.Add(new DRFailureRecords { SerialNumber = "", FailedReason = "Acknowledgement is not provided for bill to number and zipcode" });
+
+            }
+
+            int shipmentOutput = entities.SaveChanges();
+            if (shipmentOutput > 0)
+            {
+                ViewData["SucessRecordsInsertedIntoExcel"] = "Large fleet updated from uploaded file";
+            }
+
+
+
+
+
+
+
+        }
+
+        //LIST TO DATATABLE CONVERTER
+        public class ListtoDataTableConverter
+
+        {
+
+            public DataTable ToDataTable<T>(List<T> items)
+
+            {
+
+                DataTable dataTable = new DataTable(typeof(T).Name);
+
+                //Get all the properties
+
+                PropertyInfo[] Props = typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance);
+
+                foreach (PropertyInfo prop in Props)
+
+                {
+
+                    //Setting column names as Property names
+
+                    dataTable.Columns.Add(prop.Name);
+
+                }
+
+                foreach (T item in items)
+
+                {
+
+                    var values = new object[Props.Length];
+
+                    for (int i = 0; i < Props.Length; i++)
+
+                    {
+
+                        //inserting property values to datatable rows
+
+                        values[i] = Props[i].GetValue(item, null);
+
+                    }
+
+                    dataTable.Rows.Add(values);
+
+                }
+
+                //put a breakpoint here and check datatable
+
+                return dataTable;
+
+            }
+
+        }
+
+        public void CheckReportData()
+        {
+            if (FailedRecordsList.Count() != 0 || FailedRecordsList != null)
+            {
+                CreateDirectory();
+            }
+            else
+            {
+                ViewData["NoReportData"] = "No Data For Reports";
+            }
+        }
+
+        // Creating Foler For Reports
+        public void CreateDirectory()
+        {
+            WebClient request = new WebClient();
+            //request.Credentials = new NetworkCredential(@"na\svc_recall", "April@2021");
+            request.Credentials = new NetworkCredential(Convert.ToString(ConfigurationManager.AppSettings["ServiceUser"]), Convert.ToString(ConfigurationManager.AppSettings["ServicePassword"]));
+            //string[] theFolders = Directory.GetDirectories(@"\\dc02nas26h1\RECALL_TP_LF\");\\dc02nas26h1\RECALL_TP_LF\04 Report Files
+            string[] theFolders = Directory.GetDirectories(Convert.ToString(ConfigurationManager.AppSettings["ReportPath"]));
+            string folderPath = Convert.ToString(ConfigurationManager.AppSettings["ReportPath"]);
+            string folderName = Path.Combine(folderPath, "Reports-Processed on " + Convert.ToString(DateTime.Now.ToString("dd/MMMM/yyyy")).Replace("/", "-"));
+            ReportsfolderName = folderName + "\\";
+            if (Directory.Exists(folderName))
+            {
+                //Directory.Delete(folderName);
+                ViewBag.DirectoryStatus = "Directory exists";
+            }
+            else
+            {
+                System.IO.Directory.CreateDirectory(folderName);
+            }
+
+        }
+
+        //EXPORT FAILED RECORDS TO EXCEL
+        public void FailedRecordsExport()
+        {
+            if (FailedRecordsList != null || FailedRecordsList.Count() != 0)
+            {
+
+                //*************************************************************
+                string datetime = DateTime.Now.ToString("yyyyMMddHHmmss");
+                //string LogFolder = Convert.ToString(ConfigurationManager.AppSettings["ReportPath"]);
+                string LogFolder = ReportsfolderName;
+                try
+                {
+
+                    //Provide Excel file name that you like to create
+                    string ExcelFileName = "DRFailedRecords";
+                    //Provide the source folder path where you want to create excel file
+                    //string FolderPath = Convert.ToString(ConfigurationManager.AppSettings["ReportPath"]);
+                    string FolderPath = ReportsfolderName;
+                    //Provide the Stored Procedure Name
+                    //string StoredProcedureName = "dbo.sp_UpdateRecall";
+                    //Provide Excel Sheet Name 
+                    string SheetName = "DRFailedRecordSheet";
+                    //Provide the Database in which Stored Procedure exists
+
+                    ExcelFileName =uploadedFileName+"_" + ExcelFileName + "_" + datetime;
+                    var StringWithoutSpclCharac = Regex.Replace(ExcelFileName, @"[^0-9a-zA-Z]", "");
+                    ExcelFileName = Convert.ToString(StringWithoutSpclCharac);
+
+                    OleDbConnection Excel_OLE_Con = new OleDbConnection();
+                    OleDbCommand Excel_OLE_Cmd = new OleDbCommand();
+
+                    //Construct ConnectionString for Excel
+                    string connstring = "Provider=Microsoft.ACE.OLEDB.12.0;" + "Data Source=" + FolderPath + ExcelFileName
+                        + ";" + "Extended Properties=\"Excel 12.0 Xml;HDR=YES;\"";
+
+                    //drop Excel file if exists
+                    System.IO.File.Delete(FolderPath + "\\" + ExcelFileName + ".xlsx");
+
+                    //Load Data into DataTable from by executing Stored Procedure
+                    ListtoDataTableConverter converter = new ListtoDataTableConverter();
+
+                    DataTable dt = converter.ToDataTable(FailedRecordsList);
+                    DataSet ds = new DataSet();
+                    ds.Tables.Add(dt);
+
+                    //if (ds.Tables.Count == 0)
+                    if (ds.Tables[0].Rows.Count == 0)
+                    {
+                        ViewBag.Message = "No failed record updated in DealerRecall Table";
+                    }
+                    else
+                    {
+                        //Get Header Columns
+                        string TableColumns = "";
+
+                        // Get the Column List from Data Table so can create Excel Sheet with Header
+                        foreach (DataTable table in ds.Tables)
+                        {
+                            foreach (DataColumn column in table.Columns)
+                            {
+                                TableColumns += column + "],[";
+                            }
+                        }
+
+                        // Replace most right comma from Columnlist
+                        TableColumns = ("[" + TableColumns.Replace(",", " Text,").TrimEnd(','));
+                        TableColumns = TableColumns.Remove(TableColumns.Length - 2);
+
+
+                        //Use OLE DB Connection and Create Excel Sheet
+                        Excel_OLE_Con.ConnectionString = connstring;
+                        Excel_OLE_Con.Open();
+                        Excel_OLE_Cmd.Connection = Excel_OLE_Con;
+                        Excel_OLE_Cmd.CommandText = "Create table " + SheetName + " (" + TableColumns + ")";
+                        Excel_OLE_Cmd.ExecuteNonQuery();
+
+
+                        //Write Data to Excel Sheet from DataTable dynamically
+                        foreach (DataTable table in ds.Tables)
+                        {
+                            String sqlCommandInsert = "";
+                            String sqlCommandValue = "";
+                            foreach (DataColumn dataColumn in table.Columns)
+                            {
+                                sqlCommandValue += dataColumn + "],[";
+                            }
+
+                            sqlCommandValue = "[" + sqlCommandValue.TrimEnd(',');
+                            sqlCommandValue = sqlCommandValue.Remove(sqlCommandValue.Length - 2);
+                            sqlCommandInsert = "INSERT into " + SheetName + "(" + sqlCommandValue + ") VALUES(";
+
+                            int columnCount = table.Columns.Count;
+                            foreach (DataRow row in table.Rows)
+                            {
+                                string columnvalues = "";
+                                for (int i = 0; i < columnCount; i++)
+                                {
+                                    int index = table.Rows.IndexOf(row);
+                                    columnvalues += "'" + table.Rows[index].ItemArray[i] + "',";
+
+                                }
+                                columnvalues = columnvalues.TrimEnd(',');
+                                var command = sqlCommandInsert + columnvalues + ")";
+                                Excel_OLE_Cmd.CommandText = command;
+                                Excel_OLE_Cmd.ExecuteNonQuery();
+                            }
+
+                        }
+                        ViewData["excelfailedMessage"] = "Excel File Created for Failed records";
+                    }
+                    Excel_OLE_Con.Close();
+
+                }
+
+                catch (Exception exception)
+                {
+                    // Create Log File for Errors
+                    using (StreamWriter sw = System.IO.File.CreateText(LogFolder
+                        + "\\" + "ErrorLog_" + datetime + ".log"))
+                    {
+                        sw.WriteLine(exception.ToString());
+
+                    }
+
+                }
+
+            }
+            else
+            {
+                ViewData["NOFAILEDRECORD"] = "NO FAILED RECORD";
+            }
+        }
+
+
+
+        //***************************************DROP TABLE*****************************************
+        public void DropTempTable()
+        {
+            using (SqlConnection SQLConnection = new SqlConnection(ConfigurationManager.ConnectionStrings["con"].ConnectionString))
+            {
+                SQLConnection.Open();
+                string RemoveTableFromDb = "Truncate Table DRTEMP";
+                SqlCommand Com = new SqlCommand(RemoveTableFromDb, SQLConnection);
+                Com.ExecuteNonQuery();
+                SQLConnection.Close();
+            }
+
+        }
+
+
+
+
+    }
+}
+
+
+*********************************************************************************************
+@{
+
+    Layout = "~/Views/Shared/_Layout.cshtml";
+
+}
+
+
+
+<!DOCTYPE html>
+
+
+
+<html>
+
+<head>
+
+    <meta name="viewport" content="width=device-width" />
+
+    <title>LargeFleetUpdate</title>
+
+</head>
+
+<body>
+
+    <div>
+
+
+
+        <h1 style="font-weight:bold">Large Fleet Update</h1>
+
+
+
+        <form method="post" enctype="multipart/form-data">
+            
+            <div>
+                <br />
+                <input name="file" type="file" required />
+                <br />
+
+
+                <button class="btn btn-primary " style="border-radius:10px;padding:10px;width:100px; margin:5px" type="submit">Import</button>
+                <a onclick="location.href='@Url.Action("Index", "Home")'" style="border-radius:10px;padding:10px;width:auto; margin:5px;font-size:large" >Go To Third Party Update</a>
+
+            </div>
+
+            <div>
+                @ViewData["NotProcessMessage"]
+            </div>
+            <div>
+                @ViewData["SucessRecordsInsertedIntoExcel"]
+            </div>
+            <div>
+                @ViewData["excelfailedMessage"]
+            </div>
+            <div>
+                @ViewData["NOFAILEDRECORD"]
+            </div>
+
+
+
+        </form>
+
+    </div>
+
+</body>
+
+</html>
+
+*********************************************************
+
+**********************************************************************
+
+
